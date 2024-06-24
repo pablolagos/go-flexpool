@@ -5,61 +5,42 @@ import (
 	"fmt"
 	"time"
 
-	flexpool "github.com/pablolagosm/go-flexpool" // Asegúrese de reemplazar esto con el nombre real de su paquete
+	"github.com/pablolagos/go-flexpool"
 )
 
 func main() {
-	// Crear un nuevo pool con 5 trabajadores y capacidad para 10 tareas
+	// Create a new pool with 5 workers and a maximum of 10 tasks.
 	pool := flexpool.New(5, 10)
 
-	// Crear un contexto con timeout
-	ctx, cancel := context.WithCancel(context.Background())
+	// Create a context with a timeout for submitting tasks.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Función para crear tareas de ejemplo
-	createTask := func(id int, priority flexpool.Priority) func() error {
-		return func() error {
-			fmt.Printf("Ejecutando tarea %d con prioridad %v\n", id, priority)
-			time.Sleep(time.Second) // Simular trabajo
-			fmt.Printf("Tarea %d completada\n", id)
+	// Submit tasks to the pool.
+	for i := 0; i < 15; i++ {
+		index := i
+		err := pool.Submit(ctx, func(ctx context.Context) error {
+			// Simulate task work with a sleep.
+			time.Sleep(500 * time.Millisecond)
+			fmt.Printf("Task %d completed\n", index)
 			return nil
-		}
-	}
+		}, flexpool.MediumPriority)
 
-	// Enviar algunas tareas al pool
-	for i := 0; i < 10; i++ {
-		priority := flexpool.LowPriority
-		if i%3 == 0 {
-			priority = flexpool.HighPriority
-		} else if i%2 == 0 {
-			priority = flexpool.MediumPriority
-		}
-
-		err := pool.Submit(ctx, createTask(i, priority), priority)
 		if err != nil {
-			fmt.Printf("Error al enviar tarea %d: %v\n", i, err)
+			fmt.Printf("Failed to submit task %d: %v\n", index, err)
 		}
 	}
 
-	// Esperar un poco para que se procesen algunas tareas
-	time.Sleep(1 * time.Second)
+	// Wait for all submitted tasks to complete.
+	pool.WaitUntilDone()
 
-	// Cambiar el tamaño del pool
-	err := pool.Resize(ctx, 3)
+	// Shutdown the pool gracefully, waiting for all workers to finish.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	err := pool.Shutdown(shutdownCtx)
 	if err != nil {
-		fmt.Printf("Error al redimensionar el pool: %v\n", err)
-	} else {
-		fmt.Println("Pool redimensionado a 3 trabajadores")
+		fmt.Printf("Failed to shutdown pool: %v\n", err)
 	}
 
-	// Esperar otro poco
-	time.Sleep(3 * time.Second)
-
-	// Cerrar el pool
-	err = pool.Shutdown(ctx)
-	if err != nil {
-		fmt.Printf("Error al cerrar el pool: %v\n", err)
-	} else {
-		fmt.Println("Pool cerrado exitosamente")
-	}
+	fmt.Println("All tasks completed and pool shutdown gracefully.")
 }

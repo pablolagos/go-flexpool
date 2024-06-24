@@ -10,7 +10,7 @@ import (
 )
 
 func BenchmarkFlexPool(b *testing.B) {
-	pool := flexpool.New(10, 0) // 10 workers, 100 maximum tasks
+	pool := flexpool.New(10, 100000) // 10 workers, 100 maximum tasks
 
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -26,6 +26,7 @@ func BenchmarkFlexPool(b *testing.B) {
 	}
 
 	// Wait for all tasks to complete
+	b.Logf("Waiting for %d tasks to complete...", pool.QueuedTasks())
 	pool.WaitUntilDone()
 
 	// Shutdown the pool
