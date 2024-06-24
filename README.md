@@ -1,7 +1,7 @@
 # Go FlexPool
 
-[![GoDoc](https://godoc.org/github.com/pablolagosm/go-flexpool?status.svg)](https://godoc.org/github.com/pablolagosm/go-flexpool)
-[![Go Report Card](https://goreportcard.com/badge/github.com/pablolagosm/go-flexpool)](https://goreportcard.com/report/github.com/pablolagosm/go-flexpool)
+[![GoDoc](https://godoc.org/github.com/pablolagos/go-flexpool?status.svg)](https://godoc.org/github.com/pablolagos/go-flexpool)
+[![Go Report Card](https://goreportcard.com/badge/github.com/pablolagos/go-flexpool)](https://goreportcard.com/report/github.com/pablolagos/go-flexpool)
 
 Go FlexPool is a flexible and efficient goroutine pool implementation in Go, designed to manage and execute tasks with priority-based scheduling. It provides features such as dynamic resizing, context-based task cancellation, and error handling.
 
@@ -19,7 +19,7 @@ Go FlexPool is a flexible and efficient goroutine pool implementation in Go, des
 To install the package, use the following command:
 
 ```sh
-go get github.com/pablolagosm/go-flexpool
+go get github.com/pablolagos/go-flexpool
 ```
 
 ## Usage
@@ -32,7 +32,7 @@ package main
 import (
     "context"
     "fmt"
-    "github.com/pablolagosm/go-flexpool"
+    "github.com/pablolagos/go-flexpool"
     "time"
 )
 
