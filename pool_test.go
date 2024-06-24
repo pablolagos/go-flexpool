@@ -3,7 +3,6 @@ package flexpool_test
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -11,13 +10,11 @@ import (
 )
 
 func BenchmarkFlexPool(b *testing.B) {
-	pool := flexpool.New(10, 1) // 10 workers, 100 maximum tasks
+	pool := flexpool.New(10, 0) // 10 workers, 100 maximum tasks
+
 	b.ReportAllocs()
-	var wg sync.WaitGroup
 	for i := 0; i < b.N; i++ {
-		wg.Add(1)
 		err := pool.Submit(context.Background(), func(ctx context.Context) error {
-			defer wg.Done()
 			// Simulate task work
 			time.Sleep(10 * time.Millisecond)
 			return nil
@@ -28,7 +25,10 @@ func BenchmarkFlexPool(b *testing.B) {
 		}
 	}
 
-	wg.Wait()
+	// Wait for all tasks to complete
+	pool.WaitUntilDone()
+
+	// Shutdown the pool
 	pool.Shutdown(context.Background())
 }
 

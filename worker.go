@@ -38,6 +38,7 @@ func (w *Worker) Start() {
 			if err != nil {
 				w.handleError(err)
 			}
+			w.pool.wg.Done() // Decrement WaitGroup counter when task is done
 		}
 	}
 }
@@ -47,18 +48,17 @@ func (w *Worker) executeTask(task *Task) error {
 }
 
 func (w *Worker) handleError(err error) {
-	// Log the error
-	w.pool.logError(w.id, err)
-
-	// You could also send the error to a channel for centralized handling
-	// if w.pool.errorChannel != nil {
-	//     select {
-	//     case w.pool.errorChannel <- err:
-	//     default:
-	//         // Channel is full or closed, log locally
-	//         log.Printf("Worker %d: Error channel full or closed. Error: %v", w.id, err)
-	//     }
-	// }
+	if w.pool.errorChan != nil {
+		select {
+		case w.pool.errorChan <- err:
+		default:
+			// Channel is full, log locally
+			w.pool.logError(w.id, err)
+		}
+	} else {
+		// Error channel is not provided, log locally
+		w.pool.logError(w.id, err)
+	}
 }
 
 func (w *Worker) Stop(ctx context.Context) error {

@@ -34,6 +34,7 @@ type Pool struct {
 	running    int32
 	errorChan  chan error // Optional: channel for error reporting
 	cancelFunc context.CancelFunc
+	wg         sync.WaitGroup
 }
 
 type Task struct {
@@ -79,6 +80,7 @@ func (p *Pool) Submit(ctx context.Context, task func(ctx context.Context) error,
 	taskCtx, cancel := context.WithCancel(ctx)
 	t := &Task{Execute: task, Priority: priority, ctx: taskCtx, cancel: cancel}
 	heap.Push(p.tasks, t)
+	p.wg.Add(1) // Increment WaitGroup counter when submitting a task
 	p.cond.Signal()
 
 	return nil
@@ -182,15 +184,12 @@ func (p *Pool) Shutdown(ctx context.Context) error {
 	}
 }
 
+func (p *Pool) WaitUntilDone() {
+	p.wg.Wait()
+}
+
 func (p *Pool) logError(workerID int, err error) {
 	log.Printf("Worker %d encountered an error: %v", workerID, err)
-	// Optionally, send to error channel
-	select {
-	case p.errorChan <- err:
-	default:
-		// Channel is full or closed, log locally
-		log.Printf("Error channel full or closed. Error from Worker %d: %v", workerID, err)
-	}
 }
 
 func (p *Pool) QueuedTasks() int {
