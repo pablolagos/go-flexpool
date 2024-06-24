@@ -23,7 +23,7 @@ go get github.com/pablolagos/go-flexpool
 ```
 
 ## Usage
-###Creating a Pool
+### Creating a Pool
 To create a new pool, specify the maximum number of workers and the maximum number of tasks:
 
 ```go
