@@ -1,4 +1,4 @@
-package main
+package flexpool
 
 type PriorityQueue []*Task
 
