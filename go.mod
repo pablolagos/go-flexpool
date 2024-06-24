@@ -1,3 +1,3 @@
-module github.com/pablolagosm/go-flexpool
+module github.com/pablolagos/go-flexpool
 
 go 1.22.3
