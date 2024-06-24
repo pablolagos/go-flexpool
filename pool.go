@@ -36,8 +36,9 @@ type Pool struct {
 }
 
 type Task struct {
-	Execute  func() error
+	Execute  func(ctx context.Context) error
 	Priority Priority
+	ctx      context.Context
 }
 
 func New(maxWorkers, maxTasks int) *Pool {
@@ -60,7 +61,7 @@ func New(maxWorkers, maxTasks int) *Pool {
 	return p
 }
 
-func (p *Pool) Submit(ctx context.Context, task func() error, priority Priority) error {
+func (p *Pool) Submit(ctx context.Context, task func(ctx context.Context) error, priority Priority) error {
 	if atomic.LoadInt32(&p.running) == 0 {
 		return ErrPoolClosed
 	}
@@ -73,7 +74,7 @@ func (p *Pool) Submit(ctx context.Context, task func() error, priority Priority)
 		return ErrPoolFull
 	}
 
-	t := &Task{Execute: task, Priority: priority}
+	t := &Task{Execute: task, Priority: priority, ctx: ctx}
 	heap.Push(p.tasks, t)
 	p.cond.Signal()
 
@@ -156,8 +157,8 @@ func (p *Pool) Shutdown(ctx context.Context) error {
 	for _, worker := range p.workers {
 		wg.Add(1)
 		go func(w *Worker) {
+			defer wg.Done()
 			w.Stop(ctx)
-			wg.Done()
 		}(worker)
 	}
 

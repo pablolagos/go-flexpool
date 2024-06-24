@@ -43,7 +43,7 @@ func (w *Worker) Start() {
 }
 
 func (w *Worker) executeTask(task *Task) error {
-	return task.Execute()
+	return task.Execute(task.ctx)
 }
 
 func (w *Worker) handleError(err error) {
