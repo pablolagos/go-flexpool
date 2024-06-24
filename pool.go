@@ -188,6 +188,10 @@ func (p *Pool) WaitUntilDone() {
 	p.wg.Wait()
 }
 
+func (p *Pool) ErrorChan() <-chan error {
+	return p.errorChan
+}
+
 func (p *Pool) logError(workerID int, err error) {
 	log.Printf("Worker %d encountered an error: %v", workerID, err)
 }

@@ -30,38 +30,54 @@ To create a new pool, specify the maximum number of workers and the maximum numb
 package main
 
 import (
-    "context"
-    "fmt"
-    "github.com/pablolagos/go-flexpool"
-    "time"
+	"context"
+	"fmt"
+	"github.com/pablolagos/go-flexpool"
+	"time"
 )
 
 func main() {
-    pool := flexpool.New(5, 10) // 5 workers, 10 maximum tasks
+	// Create a new pool with 5 workers and a maximum of 10 tasks.
+	pool := flexpool.New(5, 10)
 
-    ctx := context.Background()
+	// Create a context with a timeout for submitting tasks.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-    // Submitting tasks
-    for i := 0; i < 15; i++ {
-        index := i
-        err := pool.submit(ctx, func(ctx context.Context) error {
-            fmt.Printf("Executing task %d\n", index)
-            time.Sleep(1 * time.Second)
-            return nil
-        }, flexpool.MediumPriority)
-        
-        if err != nil {
-            fmt.Printf("Failed to submit task %d: %v\n", index, err)
-        }
-    }
+	// Submit tasks to the pool.
+	for i := 0; i < 15; i++ {
+		index := i
+		err := pool.Submit(ctx, func(ctx context.Context) error {
+			// Simulate task work with a sleep.
+			time.Sleep(500 * time.Millisecond)
+			fmt.Printf("Task %d completed\n", index)
+			return nil
+		}, flexpool.MediumPriority)
 
-    // Shutdown the pool
-    shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-    defer cancel()
-    err := pool.Shutdown(shutdownCtx)
-    if err != nil {
-        fmt.Printf("Failed to shutdown pool: %v\n", err)
-    }
+		if err != nil {
+			fmt.Printf("Failed to submit task %d: %v\n", index, err)
+		}
+	}
+
+	// Wait for all submitted tasks to complete.
+	pool.WaitUntilDone()
+
+	// Optionally, handle errors reported by workers.
+	go func() {
+		for err := range pool.ErrorChan() {
+			fmt.Printf("Error encountered: %v\n", err)
+		}
+	}()
+
+	// Shutdown the pool gracefully, waiting for all workers to finish.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	err := pool.Shutdown(shutdownCtx)
+	if err != nil {
+		fmt.Printf("Failed to shutdown pool: %v\n", err)
+	}
+
+	fmt.Println("All tasks completed and pool shutdown gracefully.")
 }
 ```
 
@@ -84,8 +100,15 @@ defer cancel()
 
 err := pool.Resize(resizeCtx, 10) // Resize to 10 workers
 if err != nil {
-fmt.Printf("Failed to resize pool: %v\n", err)
+    fmt.Printf("Failed to resize pool: %v\n", err)
 }
+```
+
+### Waiting for Tasks to Complete
+To wait for all submitted tasks to complete:
+
+```go
+pool.WaitUntilDone()
 ```
 
 ### Shutdown the Pool
@@ -97,7 +120,7 @@ defer cancel()
 
 err := pool.Shutdown(shutdownCtx)
 if err != nil {
-fmt.Printf("Failed to shutdown pool: %v\n", err)
+    fmt.Printf("Failed to shutdown pool: %v\n", err)
 }
 ```
 
@@ -105,12 +128,11 @@ fmt.Printf("Failed to shutdown pool: %v\n", err)
 Errors encountered during task execution can be retrieved from the pool's error channel:
 
 ```go
-select {
-case err := <-pool.errorChan:
-fmt.Printf("Task error: %v\n", err)
-default:
-// No error
-}
+go func() {
+    for err := range pool.ErrorChan() {
+        fmt.Printf("Error encountered: %v\n", err)
+    }
+}()
 ```
 
 ### Contributing
