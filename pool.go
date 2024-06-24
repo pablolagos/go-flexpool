@@ -33,12 +33,14 @@ type Pool struct {
 	maxTasks   int32
 	running    int32
 	errorChan  chan error // Optional: channel for error reporting
+	cancelFunc context.CancelFunc
 }
 
 type Task struct {
 	Execute  func(ctx context.Context) error
 	Priority Priority
 	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
 func New(maxWorkers, maxTasks int) *Pool {
@@ -74,7 +76,8 @@ func (p *Pool) Submit(ctx context.Context, task func(ctx context.Context) error,
 		return ErrPoolFull
 	}
 
-	t := &Task{Execute: task, Priority: priority, ctx: ctx}
+	taskCtx, cancel := context.WithCancel(ctx)
+	t := &Task{Execute: task, Priority: priority, ctx: taskCtx, cancel: cancel}
 	heap.Push(p.tasks, t)
 	p.cond.Signal()
 
@@ -153,12 +156,15 @@ func (p *Pool) Shutdown(ctx context.Context) error {
 
 	p.cond.Broadcast()
 
+	shutdownCtx, cancel := context.WithCancel(ctx)
+	p.cancelFunc = cancel
+
 	var wg sync.WaitGroup
 	for _, worker := range p.workers {
 		wg.Add(1)
 		go func(w *Worker) {
 			defer wg.Done()
-			w.Stop(ctx)
+			w.Stop(shutdownCtx)
 		}(worker)
 	}
 
