@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 )
 
 var (
@@ -25,10 +26,9 @@ type Pool struct {
 	tasks      *PriorityQueue
 	mutex      sync.RWMutex
 	cond       *sync.Cond
-	quit       chan struct{}
-	maxWorkers int
-	maxTasks   int
-	running    bool
+	maxWorkers int32
+	maxTasks   int32
+	running    int32
 }
 
 type Task struct {
@@ -38,20 +38,16 @@ type Task struct {
 
 func New(maxWorkers, maxTasks int) *Pool {
 	p := &Pool{
-		maxWorkers: maxWorkers,
-		maxTasks:   maxTasks,
+		maxWorkers: int32(maxWorkers),
+		maxTasks:   int32(maxTasks),
 		tasks:      &PriorityQueue{},
-		quit:       make(chan struct{}),
-		running:    true,
+		running:    1,
 	}
 	p.cond = sync.NewCond(&p.mutex)
 	heap.Init(p.tasks)
 
 	for i := 0; i < maxWorkers; i++ {
-		w := &Worker{
-			id:   i,
-			pool: p,
-		}
+		w := NewWorker(i, p)
 		p.workers = append(p.workers, w)
 		go w.Start()
 	}
@@ -59,73 +55,88 @@ func New(maxWorkers, maxTasks int) *Pool {
 	return p
 }
 
-func (p *Pool) Submit(task func() error, priority Priority) error {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-
-	if !p.running {
+func (p *Pool) Submit(ctx context.Context, task func() error, priority Priority) error {
+	if atomic.LoadInt32(&p.running) == 0 {
 		return ErrPoolClosed
 	}
 
-	if p.tasks.Len() >= p.maxTasks {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if p.tasks.Len() >= int(p.maxTasks) {
 		return ErrPoolFull
 	}
 
-	heap.Push(p.tasks, &Task{Execute: task, Priority: priority})
+	t := &Task{Execute: task, Priority: priority}
+	heap.Push(p.tasks, t)
 	p.cond.Signal()
+
 	return nil
 }
 
-func (p *Pool) Shutdown(ctx context.Context) {
-	p.mutex.Lock()
-	p.running = false
-	p.mutex.Unlock()
+func (p *Pool) Resize(ctx context.Context, newSize int) error {
+	if newSize < 0 {
+		return errors.New("new size must be non-negative")
+	}
 
-	close(p.quit)
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	oldSize := atomic.LoadInt32(&p.maxWorkers)
+	if int32(newSize) > oldSize {
+		// Add more workers
+		for i := oldSize; i < int32(newSize); i++ {
+			w := NewWorker(int(i), p)
+			p.workers = append(p.workers, w)
+			go w.Start()
+		}
+	} else if int32(newSize) < oldSize {
+		// Remove excess workers
+		for i := newSize; i < int(oldSize); i++ {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+				p.workers[i].Stop(ctx)
+			}
+		}
+		p.workers = p.workers[:newSize]
+	}
+
+	atomic.StoreInt32(&p.maxWorkers, int32(newSize))
+	return nil
+}
+
+func (p *Pool) SetMaxTasks(newMax int) {
+	atomic.StoreInt32(&p.maxTasks, int32(newMax))
+}
+
+func (p *Pool) Shutdown(ctx context.Context) error {
+	if !atomic.CompareAndSwapInt32(&p.running, 1, 0) {
+		return ErrPoolClosed
+	}
+
+	p.cond.Broadcast()
+
+	var wg sync.WaitGroup
+	for _, worker := range p.workers {
+		wg.Add(1)
+		go func(w *Worker) {
+			defer wg.Done()
+			w.Stop(ctx)
+		}(worker)
+	}
 
 	done := make(chan struct{})
 	go func() {
-		p.cond.Broadcast()
-		for _, worker := range p.workers {
-			worker.Stop()
-		}
+		wg.Wait()
 		close(done)
 	}()
 
 	select {
 	case <-done:
-		// All workers finished
+		return nil
 	case <-ctx.Done():
-		// Timeout reached
+		return ctx.Err()
 	}
-}
-
-func (p *Pool) Resize(newSize int) {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-
-	if newSize > p.maxWorkers {
-		// Add more workers
-		for i := p.maxWorkers; i < newSize; i++ {
-			w := &Worker{
-				id:   i,
-				pool: p,
-			}
-			p.workers = append(p.workers, w)
-			go w.Start()
-		}
-	} else if newSize < p.maxWorkers {
-		// Remove excess workers
-		for i := newSize; i < p.maxWorkers; i++ {
-			p.workers[i].Stop()
-		}
-		p.workers = p.workers[:newSize]
-	}
-	p.maxWorkers = newSize
-}
-
-func (p *Pool) SetMaxTasks(newMax int) {
-	p.mutex.Lock()
-	p.maxTasks = newMax
-	p.mutex.Unlock()
 }
