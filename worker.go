@@ -1,7 +1,6 @@
 package flexpool
 
 import (
-	"context"
 	"sync"
 )
 
@@ -12,6 +11,7 @@ type Worker struct {
 	wg   sync.WaitGroup
 }
 
+// NewWorker creates a new worker associated with the given pool.
 func NewWorker(id int, pool *Pool) *Worker {
 	return &Worker{
 		id:   id,
@@ -20,6 +20,7 @@ func NewWorker(id int, pool *Pool) *Worker {
 	}
 }
 
+// Start begins the worker's task processing loop.
 func (w *Worker) Start() {
 	w.wg.Add(1)
 	defer w.wg.Done()
@@ -28,9 +29,8 @@ func (w *Worker) Start() {
 		select {
 		case <-w.quit:
 			return
-		default:
-			task := w.pool.getTask()
-			if task == nil {
+		case task, ok := <-w.pool.taskChan:
+			if !ok {
 				// Pool is shutting down
 				return
 			}
@@ -38,42 +38,24 @@ func (w *Worker) Start() {
 			if err != nil {
 				w.handleError(err)
 			}
-			w.pool.wg.Done() // Decrement WaitGroup counter when task is done
+			w.pool.waitGroup.Done()
 		}
 	}
 }
 
+// executeTask executes the given task and returns any error encountered.
 func (w *Worker) executeTask(task *Task) error {
-	return task.Execute(task.ctx)
+	return task.Execute()
 }
 
+// handleError logs an error encountered during task execution.
 func (w *Worker) handleError(err error) {
-	if w.pool.errorChan != nil {
-		select {
-		case w.pool.errorChan <- err:
-		default:
-			// Channel is full, log locally
-			w.pool.logError(w.id, err)
-		}
-	} else {
-		// Error channel is not provided, log locally
-		w.pool.logError(w.id, err)
-	}
+	// Log the error
+	w.pool.logError(w.id, err)
 }
 
-func (w *Worker) Stop(ctx context.Context) error {
+// Stop signals the worker to stop processing tasks and waits for it to finish.
+func (w *Worker) Stop() {
 	close(w.quit)
-
-	done := make(chan struct{})
-	go func() {
-		w.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	w.wg.Wait()
 }

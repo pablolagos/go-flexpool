@@ -2,7 +2,6 @@ package flexpool
 
 import (
 	"container/heap"
-	"context"
 	"errors"
 	"log"
 	"sync"
@@ -27,32 +26,30 @@ const (
 type Pool struct {
 	workers    []*Worker
 	tasks      *PriorityQueue
-	mutex      sync.RWMutex
-	cond       *sync.Cond
+	taskChan   chan *Task
 	maxWorkers int32
 	maxTasks   int32
 	running    int32
 	errorChan  chan error // Optional: channel for error reporting
-	cancelFunc context.CancelFunc
-	wg         sync.WaitGroup
+	waitGroup  sync.WaitGroup
 }
 
 type Task struct {
-	Execute  func(ctx context.Context) error
+	Execute  func() error
 	Priority Priority
-	ctx      context.Context
-	cancel   context.CancelFunc
 }
 
+// New creates a new worker pool with a specified number of workers and maximum tasks.
 func New(maxWorkers, maxTasks int) *Pool {
+	taskChan := make(chan *Task, maxTasks)
 	p := &Pool{
 		maxWorkers: int32(maxWorkers),
 		maxTasks:   int32(maxTasks),
 		tasks:      &PriorityQueue{},
+		taskChan:   taskChan,
 		running:    1,
 		errorChan:  make(chan error, 100), // Buffer size can be adjusted
 	}
-	p.cond = sync.NewCond(&p.mutex)
 	heap.Init(p.tasks)
 
 	for i := 0; i < maxWorkers; i++ {
@@ -64,79 +61,44 @@ func New(maxWorkers, maxTasks int) *Pool {
 	return p
 }
 
-func (p *Pool) Submit(ctx context.Context, task func(ctx context.Context) error, priority Priority) error {
+// Submit adds a task to the pool with a specified priority. If the pool is full, it returns ErrPoolFull.
+// If the pool is closed, it returns ErrPoolClosed.
+func (p *Pool) Submit(task func() error, priority Priority) error {
 	if atomic.LoadInt32(&p.running) == 0 {
 		return ErrPoolClosed
 	}
 
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
+	p.waitGroup.Add(1)
 
-	maxTasks := atomic.LoadInt32(&p.maxTasks)
-	if maxTasks != UnlimitedTasks && p.tasks.Len() >= int(maxTasks) {
+	t := &Task{Execute: task, Priority: priority}
+	select {
+	case p.taskChan <- t:
+		return nil
+	default:
+		p.waitGroup.Done()
 		return ErrPoolFull
 	}
-
-	taskCtx, cancel := context.WithCancel(ctx)
-	t := &Task{Execute: task, Priority: priority, ctx: taskCtx, cancel: cancel}
-	heap.Push(p.tasks, t)
-	p.wg.Add(1) // Increment WaitGroup counter when submitting a task
-	p.cond.Signal()
-
-	return nil
 }
 
-func (p *Pool) getTask() *Task {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-
-	for p.tasks.Len() == 0 && atomic.LoadInt32(&p.running) == 1 {
-		p.cond.Wait()
-	}
-
-	if atomic.LoadInt32(&p.running) == 0 {
-		return nil
-	}
-
-	if p.tasks.Len() > 0 {
-		return heap.Pop(p.tasks).(*Task)
-	}
-
-	return nil
-}
-
-func (p *Pool) Resize(ctx context.Context, newSize int) error {
+// Resize changes the number of workers in the pool. It adds or removes workers as needed.
+func (p *Pool) Resize(newSize int) error {
 	if newSize < 0 {
 		return errors.New("new size must be non-negative")
 	}
-
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
 
 	oldSize := atomic.LoadInt32(&p.maxWorkers)
 	if int32(newSize) > oldSize {
 		// Add more workers
 		for i := oldSize; i < int32(newSize); i++ {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-				w := NewWorker(int(i), p)
-				p.workers = append(p.workers, w)
-				go w.Start()
-			}
+			w := NewWorker(int(i), p)
+			p.workers = append(p.workers, w)
+			go w.Start()
 		}
 	} else if int32(newSize) < oldSize {
 		// Remove excess workers
-		var wg sync.WaitGroup
 		for i := newSize; i < int(oldSize); i++ {
-			wg.Add(1)
-			go func(index int) {
-				defer wg.Done()
-				p.workers[index].Stop(ctx)
-			}(i)
+			p.workers[i].Stop()
 		}
-		wg.Wait()
 		p.workers = p.workers[:newSize]
 	}
 
@@ -144,6 +106,7 @@ func (p *Pool) Resize(ctx context.Context, newSize int) error {
 	return nil
 }
 
+// SetMaxTasks sets the maximum number of tasks that can be queued. 0 means unlimited tasks.
 func (p *Pool) SetMaxTasks(newMax int) {
 	if newMax < 0 {
 		newMax = 0 // Convert negative values to 0 (unlimited)
@@ -151,53 +114,50 @@ func (p *Pool) SetMaxTasks(newMax int) {
 	atomic.StoreInt32(&p.maxTasks, int32(newMax))
 }
 
-func (p *Pool) Shutdown(ctx context.Context) error {
+func (p *Pool) Shutdown() error {
 	if !atomic.CompareAndSwapInt32(&p.running, 1, 0) {
 		return ErrPoolClosed
 	}
 
-	p.cond.Broadcast()
-
-	shutdownCtx, cancel := context.WithCancel(ctx)
-	p.cancelFunc = cancel
+	close(p.taskChan)
 
 	var wg sync.WaitGroup
 	for _, worker := range p.workers {
 		wg.Add(1)
 		go func(w *Worker) {
-			defer wg.Done()
-			w.Stop(shutdownCtx)
+			w.Stop()
+			wg.Done()
 		}(worker)
 	}
 
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	wg.Wait()
+	close(p.errorChan)
+	return nil
 }
 
+// WaitUntilDone blocks until all submitted tasks have been completed.
 func (p *Pool) WaitUntilDone() {
-	p.wg.Wait()
+	p.waitGroup.Wait()
 }
 
-func (p *Pool) ErrorChan() <-chan error {
+// Errors returns a read-only channel for receiving errors from tasks.
+func (p *Pool) Errors() <-chan error {
 	return p.errorChan
 }
 
+// logError logs an error encountered by a worker and optionally sends it to the error channel.
 func (p *Pool) logError(workerID int, err error) {
 	log.Printf("Worker %d encountered an error: %v", workerID, err)
+	// Optionally, send to error channel
+	select {
+	case p.errorChan <- err:
+	default:
+		// Channel is full or closed, log locally
+		log.Printf("Error channel full or closed. Error from Worker %d: %v", workerID, err)
+	}
 }
 
+// QueuedTasks returns the number of tasks currently queued.
 func (p *Pool) QueuedTasks() int {
-	p.mutex.RLock()
-	defer p.mutex.RUnlock()
-	return p.tasks.Len()
+	return len(p.taskChan)
 }
