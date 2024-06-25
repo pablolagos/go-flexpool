@@ -1,150 +1,108 @@
-# Go FlexPool
+# go-flexpool
 
-[![GoDoc](https://godoc.org/github.com/pablolagos/go-flexpool?status.svg)](https://godoc.org/github.com/pablolagos/go-flexpool)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/pablolagos/go-flexpool)](https://goreportcard.com/report/github.com/pablolagos/go-flexpool)
+[![GoDoc](https://godoc.org/github.com/pablolagos/go-flexpool?status.svg)](https://godoc.org/github.com/pablolagos/go-flexpool)
 
-Go FlexPool is a flexible and efficient goroutine pool implementation in Go, designed to manage and execute tasks with priority-based scheduling. It provides features such as dynamic resizing, context-based task cancellation, and error handling.
+`go-flexpool` is a flexible and efficient worker pool implementation in Go, designed to handle tasks with different priorities seamlessly.
 
 ## Features
 
-- Priority-based task scheduling
-- Dynamic pool resizing
-- Context-based task cancellation
-- Graceful shutdown
-- Error reporting through channels
-- Configurable maximum tasks and workers
+- **Priority-Based Task Scheduling**: Submit tasks with different priorities (High, Medium, Low).
+- **Dynamic Worker Pool Resizing**: Increase or decrease the number of workers on-the-fly.
+- **Graceful Shutdown**: Ensure all tasks are completed before shutting down the pool.
+- **Error Handling**: Access errors encountered during task execution through an error channel.
+- **Concurrency**: Efficiently manage concurrent task execution with Go's goroutines and channels.
 
 ## Installation
 
-To install the package, use the following command:
+Install `go-flexpool` using `go get`:
 
-```sh
+```go
 go get github.com/pablolagos/go-flexpool
 ```
 
 ## Usage
-### Creating a Pool
-To create a new pool, specify the maximum number of workers and the maximum number of tasks:
+
+### Create a New Pool
+
+Create a new pool with a specified number of workers and maximum tasks:
 
 ```go
-package main
+import "github.com/pablolagos/go-flexpool"
 
-import (
-	"context"
-	"fmt"
-	"github.com/pablolagos/go-flexpool"
-	"time"
-)
-
-func main() {
-	// Create a new pool with 5 workers and a maximum of 10 tasks.
-	pool := flexpool.New(5, 10)
-
-	// Create a context with a timeout for submitting tasks.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Submit tasks to the pool.
-	for i := 0; i < 15; i++ {
-		index := i
-		err := pool.Submit(ctx, func(ctx context.Context) error {
-			// Simulate task work with a sleep.
-			time.Sleep(500 * time.Millisecond)
-			fmt.Printf("Task %d completed\n", index)
-			return nil
-		}, flexpool.MediumPriority)
-
-		if err != nil {
-			fmt.Printf("Failed to submit task %d: %v\n", index, err)
-		}
-	}
-
-	// Wait for all submitted tasks to complete.
-	pool.WaitUntilDone()
-
-	// Optionally, handle errors reported by workers.
-	go func() {
-		for err := range pool.ErrorChan() {
-			fmt.Printf("Error encountered: %v\n", err)
-		}
-	}()
-
-	// Shutdown the pool gracefully, waiting for all workers to finish.
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-	err := pool.Shutdown(shutdownCtx)
-	if err != nil {
-		fmt.Printf("Failed to shutdown pool: %v\n", err)
-	}
-
-	fmt.Println("All tasks completed and pool shutdown gracefully.")
-}
+pool := flexpool.New(100, 1000) // 100 workers, max 1000 queued tasks
 ```
 
-### Submitting Tasks
-Tasks can be submitted to the pool with a specific priority:
+### Submit Tasks
+
+Submit tasks to the pool with different priorities:
 
 ```go
-err := pool.Submit(ctx, func(ctx context.Context) error {
-// Task logic here
-return nil
-}, flexpool.HighPriority)
-```
+err := pool.Submit(func() error {
+    // Your task code here
+    return nil
+}, flexpool.MediumPriority)
 
-### Resizing the Pool
-You can resize the pool dynamically:
-
-```go
-resizeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-defer cancel()
-
-err := pool.Resize(resizeCtx, 10) // Resize to 10 workers
 if err != nil {
-    fmt.Printf("Failed to resize pool: %v\n", err)
+log.Printf("Failed to submit task: %v", err)
 }
 ```
 
-### Waiting for Tasks to Complete
-To wait for all submitted tasks to complete:
+### Resize the Pool
+
+Resize the pool to adjust the number of workers dynamically:
+
+```go
+err := pool.Resize(200) // Resize to 200 workers
+if err != nil {
+    log.Printf("Failed to resize pool: %v", err)
+}
+```
+
+### Shutdown the Pool
+
+Gracefully shutdown the pool, ensuring all tasks are completed:
+
+```go
+err := pool.Shutdown()
+if err != nil {
+    log.Printf("Failed to shutdown pool: %v", err)
+}
+```
+
+### Wait Until All Tasks are Done
+
+Wait until all submitted tasks are completed:
 
 ```go
 pool.WaitUntilDone()
 ```
 
-### Shutdown the Pool
-To gracefully shutdown the pool, ensuring all tasks are completed or cancelled:
+### Access Errors
+
+Access errors encountered during task execution through the error channel:
 
 ```go
-shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-defer cancel()
-
-err := pool.Shutdown(shutdownCtx)
-if err != nil {
-    fmt.Printf("Failed to shutdown pool: %v\n", err)
+for err := range pool.Errors() {
+    log.Printf("Task error: %v", err)
 }
 ```
 
-### Error Handling
-Errors encountered during task execution can be retrieved from the pool's error channel:
+## Contributing
 
-```go
-go func() {
-    for err := range pool.ErrorChan() {
-        fmt.Printf("Error encountered: %v\n", err)
-    }
-}()
-```
+Contributions are welcome! Please read the [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute to the project.
 
-### Contributing
-Contributions are welcome! Please submit issues or pull requests for any enhancements or bug fixes.
+## License
 
-License
-This project is licensed under the MIT License. See the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Acknowledgements
+## Contact
 
-This project was inspired by various goroutine pool implementations and aims to provide a flexible and robust solution for managing concurrent tasks in Go.
+For questions or suggestions, feel free to open an issue or contact me at [pablolagos](https://github.com/pablolagos).
 
 ---
 
-Feel free to adjust any sections or add more details as necessary for your project.
+<p align="center">
+  <a href="https://github.com/pablolagos/go-flexpool">GitHub Repository</a>
+</p>
