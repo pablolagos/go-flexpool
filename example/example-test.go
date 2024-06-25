@@ -1,46 +1,43 @@
 package main
 
 import (
-	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/pablolagos/go-flexpool"
 )
 
 func main() {
-	// Create a new pool with 5 workers and a maximum of 10 tasks.
-	pool := flexpool.New(5, 10)
+	// Create a new pool with 100 workers and a maximum of 1000 queued tasks
+	pool := flexpool.New(100, 1000)
 
-	// Create a context with a timeout for submitting tasks.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	// Define a sample task
+	task := func() error {
+		time.Sleep(1 * time.Second)
+		fmt.Println("Task completed")
+		return nil
+	}
 
-	// Submit tasks to the pool.
-	for i := 0; i < 15; i++ {
-		index := i
-		err := pool.Submit(ctx, func(ctx context.Context) error {
-			// Simulate task work with a sleep.
-			time.Sleep(500 * time.Millisecond)
-			fmt.Printf("Task %d completed\n", index)
-			return nil
-		}, flexpool.MediumPriority)
-
+	// Submit the task with medium priority
+	for i := 0; i < 10; i++ { // Submit multiple tasks
+		err := pool.Submit(task, flexpool.MediumPriority)
 		if err != nil {
-			fmt.Printf("Failed to submit task %d: %v\n", index, err)
+			log.Printf("Failed to submit task: %v", err)
 		}
 	}
 
-	// Wait for all submitted tasks to complete.
+	// Wait until all submitted tasks are done
 	pool.WaitUntilDone()
 
-	// Shutdown the pool gracefully, waiting for all workers to finish.
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-	err := pool.Shutdown(shutdownCtx)
+	// Shutdown the pool
+	err := pool.Shutdown()
 	if err != nil {
-		fmt.Printf("Failed to shutdown pool: %v\n", err)
+		log.Printf("Failed to shutdown pool: %v", err)
 	}
 
-	fmt.Println("All tasks completed and pool shutdown gracefully.")
+	// Handle errors (if any)
+	for err := range pool.Errors() {
+		log.Printf("Task error: %v", err)
+	}
 }
